@@ -6,7 +6,7 @@ import torch.optim as optim
 from torch.autograd import Variable
 import torch.nn.functional as F
 import torch.optim as optim
-import dataloader as DL
+import data.dataloader as DL
 
 
 class EEGnet(nn.Module):
@@ -42,27 +42,19 @@ class EEGnet(nn.Module):
         data = F.elu(data, alpha=1.0)
         data = self.l2_pooling(data)
         data = F.dropout(data, p=0.25)
-        # print(data.shape)
         # L-3
         data = self.l3_conv(data)
         data = self.l3_batchnorm(data)
         data = F.elu(data, alpha=1.0)
         data = self.l3_pooling(data)
         data = F.dropout(data, p=0.25)
-        # data = data.permute(0,1,3,2)
-        # print(data.shape)
         # L-4
-        # print(data.shape,"L4")
         data = data.view(-1,736*2)
-        # print(data.shape,"VIEW")
         data = self.fc1(data)
-        # print(data.shape,"LINEAR")
-        data = F.softmax(data, dim=1)
-        # print(data.shape,"SOFT")
-        data = torch.argmax(data, dim=1)
-        # data = torch.amax(data, dim=1)
+        # BCELoss
+        # data = F.softmax(data, dim=1)
+        # data = torch.argmax(data, dim=1)
         data = data.view(-1,1)
-        # print(data.shape,"ANS")
         return data
 
 def evaluate(model, X, Y, params = ["acc"]):
@@ -86,6 +78,10 @@ def evaluate(model, X, Y, params = ["acc"]):
     
     predicted = predicted.data.cpu().numpy()
     
+    # CrossEntropyLoss
+    predicted = torch.reshape(torch.from_numpy(predicted),(-1,2)).float()
+    predicted = torch.argmax(predicted, dim=1)
+
     for param in params:
         if param == 'acc':
             results.append(accuracy_score(Y, np.round(predicted)))
@@ -104,7 +100,7 @@ def evaluate(model, X, Y, params = ["acc"]):
 def main():
     train_data, train_label, test_data, test_label = DL.read_bci_data()
     net = EEGnet().double()
-    criterion = nn.BCELoss()
+    criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(net.parameters())
     # print(train_label.shape)
     # net(train_data)
@@ -119,9 +115,13 @@ def main():
             e = i*batch_size+batch_size
             
             inputs = torch.from_numpy(train_data[s:e])
-            labels = torch.FloatTensor(np.array([train_label[s:e]]).T*1.0)
+            # BCELoss
+            # labels = torch.FloatTensor(np.array([train_label[s:e]]).T*1.0)
             
+            # CrossEntropyLoss
+            labels = torch.LongTensor(np.array([train_label[s:e]]).T*1.0)
             # wrap them in Variable
+            
             inputs, labels = Variable(inputs), Variable(labels)
 
             # zero the parameter gradients
@@ -129,18 +129,25 @@ def main():
 
             # forward + backward + optimize
             outputs = net(inputs)
-            # print(outputs)
-            # print(labels)
-            loss = criterion(outputs.float(), labels.float())
+            
+            outputs = torch.reshape(outputs,(-1,2))
+            labels = torch.reshape(labels,(-1,))
+            
+            # CrossEntropyLoss
+            # labels = torch.tensor(labels, dtype=torch.long) 
+            loss = criterion(outputs.float(), labels)
+            
+            # BCELoss
+            # loss = criterion(outputs.float(), labels.float())
+            
             loss = loss.requires_grad_()
-            loss.reduction = 'sum'
+            loss.reduction = 'mean'
             # print(loss)
             loss.backward()
             
             
             optimizer.step()
             running_loss += loss.item()
-        
         # Validation accuracy
         params = ["acc", "auc", "fmeasure"]
         print (params)
